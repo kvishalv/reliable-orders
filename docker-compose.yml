@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  # Order Service - main entry point
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - PAYMENT_SERVICE_URL=http://payment-service:8081
+      - OTEL_COLLECTOR_ENDPOINT=otel-collector:4317
+      - PORT=8080
+    depends_on:
+      - payment-service
+      - otel-collector
+    networks:
+      - microservices
+
+  # Payment Service - downstream dependency
+  payment-service:
+    build:
+      context: ./payment-service
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      - OTEL_COLLECTOR_ENDPOINT=otel-collector:4317
+      - PORT=8081
+      # Fault injection controls (set to 0 for no faults)
+      - PAYMENT_DELAY_MS=0
+      - PAYMENT_ERROR_PCT=0
+      - RATE_LIMIT_PCT=0
+    depends_on:
+      - otel-collector
+    networks:
+      - microservices
+
+  # OpenTelemetry Collector - receives traces and forwards to Jaeger
+  otel-collector:
+    image: otel/opentelemetry-collector:0.91.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./config/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8889:8889"   # Prometheus metrics exporter
+    depends_on:
+      - jaeger
+    networks:
+      - microservices
+
+  # Jaeger - distributed tracing UI
+  jaeger:
+    image: jaegertracing/all-in-one:1.52
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317"         # OTLP gRPC receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - microservices
+
+  # Prometheus - metrics collection (optional profile)
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    profiles:
+      - metrics
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - microservices
+
+  # Grafana - metrics visualization (optional profile)
+  grafana:
+    image: grafana/grafana:10.2.2
+    profiles:
+      - metrics
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+    depends_on:
+      - prometheus
+    networks:
+      - microservices
+
+  # Load Generator - for testing reliability patterns
+  loadgen:
+    build:
+      context: ./loadgen
+      dockerfile: Dockerfile
+    networks:
+      - microservices
+    profiles:
+      - loadgen
+
+networks:
+  microservices:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
