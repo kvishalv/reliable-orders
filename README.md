@@ -1,4 +1,4 @@
-# Reliable Orders - Microservices Demo
+# Reliable Orders - Microservices Demo and play
 
 A production-grade Go microservices demonstration showcasing distributed tracing, reliability patterns, and fault tolerance using OpenTelemetry and Jaeger.
 
